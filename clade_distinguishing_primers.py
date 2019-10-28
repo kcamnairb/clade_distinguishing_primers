@@ -11,6 +11,7 @@ import pandas as pd
 import re
 import scipy.stats as ss
 import numpy as np
+import shutil
 
 parser = argparse.ArgumentParser(description='Designs primers that will distinguish \
     between clades or user defined groups. If a groups file is not supplied then \
@@ -42,7 +43,7 @@ def run_sibelia(query_fasta):
     query_basename = os.path.splitext(os.path.basename(query_fasta))[0]
     prefix = 'sibelia/' + query_basename + '_vs_' + reference_basename
     if not os.path.isfile(prefix + '.vcf'):
-        command = 'C-Sibelia.py -p 1 -u' + prefix + '_unmapped.fasta ' + \
+        command = 'python2 ' + sibelia_path + ' -p 1 -u' + prefix + '_unmapped.fasta ' + \
         '-v ' + prefix + '.vcf ' + reference_fasta_cleaned + ' ' + query_fasta + ' > ' + prefix + '.log'
         subprocess.call(command, shell=True)
     return prefix + '.vcf'
@@ -53,6 +54,7 @@ if not os.path.exists('fastas_clean'):
     os.makedirs('fastas_clean')
 query_fastas_cleaned = [clean_fasta(f) for f in args.query_fastas]
 reference_fasta_cleaned = clean_fasta(args.reference_fasta)
+sibelia_path = shutil.which('C-Sibelia.py')
 pool = multiprocessing.Pool(processes=args.num_threads)
 vcfs_sibelia = pool.map(run_sibelia, query_fastas_cleaned)
 
@@ -117,9 +119,9 @@ subprocess.call(convert_command, shell=True)
 subprocess.call('vk phylo tree upgma snps_only_merged_with_ref.vcf.gz > tree_upgma.nwk', shell=True)
 subprocess.call("perl -p -i -e 's/\n//g' tree_upgma.nwk", shell=True)
 if args.groups_file:
-    subprocess.call('TreeCluster.py -t 0.145 -tf argmax_clusters -i tree_upgma.nwk -o tree_upgma_clusters.txt', shell=True)
     clusters = pd.read_csv(args.groups_file)
-else: 
+else:
+    subprocess.call('TreeCluster.py -t 0.145 -tf argmax_clusters -i tree_upgma.nwk -o tree_upgma_clusters.txt', shell=True)
     clusters = pd.read_csv('tree_upgma_clusters.txt', sep='\t')
 clusters = pd.Series(clusters.ClusterNumber.tolist(), index=clusters.SequenceName.tolist())
 clusters = clusters[clusters > 0]
@@ -182,7 +184,7 @@ def cramers_v(x, y):
 # Round genotype lengths to nearest 40 bp so that small differences don't skew Cramer's V statistic
 gt_lengths_rounded = gt_lengths.applymap(lambda x: custom_round(x, base=40))    
 gt_lengths_cor = gt_lengths_rounded.apply(lambda col: cramers_v(col, clusters), axis=0)
-gt_lengths_best_cor = pd.concat((clusters,gt_lengths.loc[:, gt_lengths_cor > 0.6]),  axis=1)
+gt_lengths_best_cor = pd.concat((clusters,gt_lengths.loc[:, gt_lengths_cor > 0.6]), axis=1, sort=False)
 gt_lengths_best_cor.rename(columns={0:'clusters'}, inplace=True)
 gt_lengths_best_cor = gt_lengths_best_cor.sort_values('clusters')
 contigs_dict = SeqIO.to_dict(SeqIO.parse(args.reference_fasta, 'fasta'))
@@ -268,7 +270,7 @@ amplicon_lengths['cramers_v'] = amplicon_lengths_cor
 amplicon_lengths = amplicon_lengths.sort_values('cramers_v', ascending=False)
 amplicon_lengths_w_primers = pd.concat(
     [pd.DataFrame(clusters, columns=['clusters']).transpose(),
-     amplicon_lengths], axis=0)
+     amplicon_lengths], axis=0, sort=False)
 amplicon_lengths_w_primers = amplicon_lengths_w_primers.merge(
     primers_df.drop(clusters.index, axis=1), how='left', left_index=True, right_index=True)
 amplicon_lengths_w_primers = amplicon_lengths_w_primers.loc[:,
